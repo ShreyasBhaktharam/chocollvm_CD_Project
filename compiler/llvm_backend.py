@@ -171,53 +171,6 @@ class LLVMBackend(Backend):
 
         self.builder.position_at_end(bb_end)
 
-        '''
-
-        # Create basic blocks for if and else
-        if_bb = self.builder.function.append_basic_block("if")
-        else_bb = self.builder.function.append_basic_block("else")
-        end_bb = self.builder.function.append_basic_block("end")
-
-        # Create phi node for if and else
-        phi_node = self.builder.phi(self._get_llvm_type("int"), name="if_else")
-
-        # Visit condition
-        #cond = self.visit(node.cond)
-        cond = self.visit(node.condition)
-
-        # Create branch instruction
-        self.builder.cbranch(cond, if_bb, else_bb)
-
-        # Visit if body
-        ifInfo = node.toJSON()
-        self.builder.position_at_end(if_bb)
-        self.visit(node.condition)
-        #print("ifInfo[\"body\"]: ", ifInfo["thenBody"][0])
-        self.builder.branch(end_bb)
-
-        # Visit else body
-        self.builder.position_at_end(else_bb)
-        self.visit(node.condition)
-        self.builder.branch(end_bb)
-
-        # Add phi node to end block
-        self.builder.position_at_end(end_bb)
-        phi_node.add_incoming(cond, if_bb)
-        phi_node.add_incoming(self.builder.not_(cond), else_bb)
-
-        # Return phi node
-        return phi_node
-        
-        condition=self.visit(node.condition)
-        with self.builder.if_else(condition) as (then,otherwise):
-            with then:
-                for stmt in node.thenBody:
-                    self.visit(stmt)
-            with otherwise:
-                for stmt in node.elseBody:
-                    self.visit(stmt)
-        '''
-
 
     def WhileStmt(self, node: WhileStmt):
         if self.builder is None:
@@ -297,39 +250,6 @@ class LLVMBackend(Backend):
     def IfExpr(self, node: IfExpr) -> PhiInstr:
         if self.builder is None:
             raise Exception("No builder is active")
-
-        '''
-        # Create basic blocks for if and else
-        if_bb = self.builder.function.append_basic_block("if")
-        else_bb = self.builder.function.append_basic_block("else")
-        end_bb = self.builder.function.append_basic_block("end")
-
-        # Create phi node for if and else
-        phi_node = self.builder.phi(self._get_llvm_type("int"), name="if_else")
-
-        # Visit condition
-        cond = self.visit(node.condition)
-
-        # Create branch instruction
-        self.builder.cbranch(cond, if_bb, else_bb)
-
-        # Visit if body
-        self.builder.position_at_end(if_bb)
-        value = self.visit(node.thenExpr)
-        self.builder.branch(end_bb)
-
-        # Visit else body
-        self.builder.position_at_end(else_bb)
-        value = self.visit(node.elseExpr)
-        self.builder.branch(end_bb)
-
-        # Add phi node to end block
-        self.builder.position_at_end(end_bb)
-        phi_node.add_incoming(value, if_bb)
-        phi_node.add_incoming(value, else_bb)
-
-        return phi_node
-        '''
         
         if self.builder is None:
             raise Exception("[IF EXPR] No builder is active")
