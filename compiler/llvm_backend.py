@@ -1,3 +1,4 @@
+
 from typing import Dict, List, Optional
 
 from llvmlite import binding, ir
@@ -106,25 +107,273 @@ class LLVMBackend(Backend):
     ##################################
 
     def VarDef(self, node: VarDef):
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        typed_var_info = node.var.toJSON()
+        alloca = self._create_alloca(typed_var_info["identifier"]["name"], self._get_llvm_type(typed_var_info["type"]["className"]))
+        
+        # Store variable value
+        value = self.visit(node.value)
+        self.builder.store(value, alloca)
+
+        # Add variable to symbol table
+        self.func_symtab[-1][typed_var_info["identifier"]["name"]] = alloca
 
     def AssignStmt(self, node: AssignStmt):
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        
+        val = self.visit(node.value)
+        targets = node.targets[::-1]
+        for target in targets:
+            self.builder.store(val, self.func_symtab[-1][target.name])
+        
 
     def IfStmt(self, node: IfStmt):
-        pass
+        
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        bb_condition = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.condition")
+                )
+
+        bb_then = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.bb_then")
+                )
+
+        bb_else = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.bb_else")
+                )
+
+        bb_end = self.builder.append_basic_block(
+                self.module.get_unique_name("ifstmt.end")
+                )
+
+        self.builder.branch(bb_condition)
+
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_then, bb_else)
+
+        with self.builder.goto_block(bb_then):
+            for stmt in node.thenBody:
+                self.visit(stmt)
+            self.builder.branch(bb_end)
+
+
+        with self.builder.goto_block(bb_else):
+            for stmt in node.elseBody:
+                self.visit(stmt)
+            self.builder.branch(bb_end)
+
+        self.builder.position_at_end(bb_end)
+
+        '''
+
+        # Create basic blocks for if and else
+        if_bb = self.builder.function.append_basic_block("if")
+        else_bb = self.builder.function.append_basic_block("else")
+        end_bb = self.builder.function.append_basic_block("end")
+
+        # Create phi node for if and else
+        phi_node = self.builder.phi(self._get_llvm_type("int"), name="if_else")
+
+        # Visit condition
+        #cond = self.visit(node.cond)
+        cond = self.visit(node.condition)
+
+        # Create branch instruction
+        self.builder.cbranch(cond, if_bb, else_bb)
+
+        # Visit if body
+        ifInfo = node.toJSON()
+        self.builder.position_at_end(if_bb)
+        self.visit(node.condition)
+        #print("ifInfo[\"body\"]: ", ifInfo["thenBody"][0])
+        self.builder.branch(end_bb)
+
+        # Visit else body
+        self.builder.position_at_end(else_bb)
+        self.visit(node.condition)
+        self.builder.branch(end_bb)
+
+        # Add phi node to end block
+        self.builder.position_at_end(end_bb)
+        phi_node.add_incoming(cond, if_bb)
+        phi_node.add_incoming(self.builder.not_(cond), else_bb)
+
+        # Return phi node
+        return phi_node
+        
+        condition=self.visit(node.condition)
+        with self.builder.if_else(condition) as (then,otherwise):
+            with then:
+                for stmt in node.thenBody:
+                    self.visit(stmt)
+            with otherwise:
+                for stmt in node.elseBody:
+                    self.visit(stmt)
+        '''
+
 
     def WhileStmt(self, node: WhileStmt):
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        bb_condition = self.builder.function.append_basic_block(self.module.get_unique_name("while_cond"))
+        bb_body = self.builder.function.append_basic_block(self.module.get_unique_name("while_body"))
+        bb_end = self.builder.function.append_basic_block(self.module.get_unique_name("while_end"))
+
+        self.builder.branch(bb_condition)
+
+        #Visit while condition
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_body, bb_end)
+
+        #Visit while body
+        with self.builder.goto_block(bb_body):
+            for stmt in node.body:
+                self.visit(stmt)
+            self.builder.branch(bb_condition)
+
+        self.builder.position_at_end(bb_end)        
 
     def BinaryExpr(self, node: BinaryExpr) -> Optional[ICMPInstr]:
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        # Visit left and right expressions
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+
+        # Create comparison instruction
+        if node.operator == "==":
+            return self.builder.icmp_signed("==", left, right)
+        elif node.operator == "!=":
+            return self.builder.icmp_signed("!=", left, right)
+        elif node.operator == "<":
+            return self.builder.icmp_signed("<", left, right)
+        elif node.operator == "<=":
+            return self.builder.icmp_signed("<=", left, right)
+        elif node.operator == ">":
+            return self.builder.icmp_signed(">", left, right)
+        elif node.operator == ">=":
+            return self.builder.icmp_signed(">=", left, right)
+        elif node.operator == "+":
+            return self.builder.add(left, right)
+        elif node.operator == "-":
+            return self.builder.sub(left, right)
+        elif node.operator == "*":
+            return self.builder.mul(left, right)
+        elif node.operator == "%":
+            return self.builder.srem(left, right)
+        elif node.operator == "and":
+            return self.builder.and_(left, right)
+        elif node.operator == "or":
+            return self.builder.or_(left, right)
+
+        else:
+            raise Exception(f"Invalid operator: {node.operator}")
+
+
 
     def Identifier(self, node: Identifier) -> LoadInstr:
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        
+        # Get address of variable
+        addr = self._get_var_addr(node.name)
+
+        # Load value
+        return self.builder.load(addr)
+        
+
 
     def IfExpr(self, node: IfExpr) -> PhiInstr:
-        pass
+        if self.builder is None:
+            raise Exception("No builder is active")
+
+        '''
+        # Create basic blocks for if and else
+        if_bb = self.builder.function.append_basic_block("if")
+        else_bb = self.builder.function.append_basic_block("else")
+        end_bb = self.builder.function.append_basic_block("end")
+
+        # Create phi node for if and else
+        phi_node = self.builder.phi(self._get_llvm_type("int"), name="if_else")
+
+        # Visit condition
+        cond = self.visit(node.condition)
+
+        # Create branch instruction
+        self.builder.cbranch(cond, if_bb, else_bb)
+
+        # Visit if body
+        self.builder.position_at_end(if_bb)
+        value = self.visit(node.thenExpr)
+        self.builder.branch(end_bb)
+
+        # Visit else body
+        self.builder.position_at_end(else_bb)
+        value = self.visit(node.elseExpr)
+        self.builder.branch(end_bb)
+
+        # Add phi node to end block
+        self.builder.position_at_end(end_bb)
+        phi_node.add_incoming(value, if_bb)
+        phi_node.add_incoming(value, else_bb)
+
+        return phi_node
+        '''
+        
+        if self.builder is None:
+            raise Exception("[IF EXPR] No builder is active")
+
+        bb_condition = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.condition")
+                )
+
+        bb_then = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.bb_then")
+                )
+
+        bb_else = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.bb_else")
+                )
+
+        bb_end = self.builder.append_basic_block(
+                self.module.get_unique_name("ifexpr.end")
+                )
+
+        self.builder.branch(bb_condition)
+
+        with self.builder.goto_block(bb_condition):
+            condition = self.visit(node.condition)
+            self.builder.cbranch(condition, bb_then, bb_else)
+
+
+        with self.builder.goto_block(bb_then):
+            thenExpr = self.visit(node.thenExpr)
+            self.builder.branch(bb_end)
+
+        with self.builder.goto_block(bb_else):
+            elseExpr = self.visit(node.elseExpr)
+            self.builder.branch(bb_end)
+
+        with self.builder.goto_block(bb_end):
+            type_name = str(node.thenExpr.inferredType)
+            phi = self.builder.phi(self._get_llvm_type(type_name))
+            phi.add_incoming(thenExpr, bb_then)
+            phi.add_incoming(elseExpr, bb_else)
+
+
+        self.builder.position_at_end(bb_end)
+        return phi
 
     ##################################
     #      END OF IMPLEMENTATION     #
